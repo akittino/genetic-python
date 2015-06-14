@@ -25,7 +25,7 @@ from operator import itemgetter
 max_init_val = 100
 indv_vals = 2
 indvs_per_thread = 2
-
+mutation_threshold = 5  # threshold in range (0, 100)
 
 
 def _parse_args():
@@ -213,11 +213,14 @@ class Worker(multiprocessing.Process):
     def __n_workers(self):
         return self.__configuration.n_workers
 
-    def __individuals_number(self):
-        return self.__configuration.n_workers * indvs_per_thread
+    def __n_slaves(self):
+        return self.__configuration.n_workers - 1
+
+    def __n_individuals(self):
+        return self.__n_slaves() * indvs_per_thread
 
     def __data_size(self):
-        return self.__individuals_number() * indv_vals
+        return self.__n_individuals() * indv_vals
 
     def __barrier(self):
         self.__shared.barrier.wait()
@@ -257,26 +260,62 @@ class Worker(multiprocessing.Process):
             fitness = self.__function_calculate(data[ii], data[ii + 1])
             individuals.append((fitness, data[ii], data[ii + 1]))
 
-        individuals.sort(key = itemgetter(0))
+        individuals.sort(key=itemgetter(0))
 
-        for ii in self.my_range(0, self.__individuals_number(), 1):
+        for ii in self.my_range(0, self.__n_individuals(), 1):
             data[ii * 2] = individuals[ii][1]
             data[(ii * 2) + 1] = individuals[ii][2]
 
     def run(self):
         self.__log('Started.')
 
-        # selection
-        if self.__worker_id == 0:
+        if self.__worker_id == 0:  # master
 
-            individuals_data = [random.randint(0, max_init_val) for _ in range(self.__data_size())]
-            print(individuals_data)
+            # init first generation
+            data = [random.randint(0, max_init_val) for _ in range(self.__data_size())]  # individuals data
+            print(data)
 
-            self.__sort_individuals_data(individuals_data)
-            print(individuals_data)
+            # selection
+            self.__sort_individuals_data(data)
+            print(data)
 
+            best_solution_x = data[0]
+            best_solution_y = data[1]
 
+            # data sending to slaves
+            for ii in self.my_range(1, self.__n_workers, 1):
+                msg_data = [best_solution_x, best_solution_y, data[ii * 2], data[(ii * 2) + 1]]
+                self._send(ii, msg_data)
 
+            # data receiving from slaves
+            for ii in self.my_range(1, self.__n_workers, 1):
+                source_id, msg_data = self._receive(ii)
+                new_ii = (ii - 1) * 2 + self.__n_individuals()
+                data[new_ii] = msg_data[0]
+                data[new_ii + 1] = msg_data[1]
+
+            print(data)
+            self.__sort_individuals_data(data)
+            print(data)
+
+        else:  # slave
+
+            source_id, msg_data = self._receive(0)
+            # crossover
+            new_x = (msg_data[0] + msg_data[2]) / 2
+            new_y = (msg_data[1] + msg_data[3]) / 2
+
+            # mutation
+            if random.randint(0, 100) < mutation_threshold:
+                if random.randint(0, 100) >= 50:
+                    new_x -= 1
+                    new_y -= 1
+                else:
+                    new_x += 1
+                    new_y += 1
+
+            new_msg_data = [new_x, new_y]
+            self._send(0, new_msg_data)
 
 
 def main():
