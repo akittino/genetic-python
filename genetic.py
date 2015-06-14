@@ -19,15 +19,17 @@ import datetime
 import sys
 import argparse
 import random
-import math
 from operator import itemgetter
 
 DEBUG = 0
 GENERATIONS = 1000
-max_init_val = 100
+ISLANDS = 10
+MAX_INIT_VAL = 100
+MUTATION_THRESHOLD = 5  # threshold in range (0, 100)
+MIGRATION_THRESHOLD = 2  # threshold in range (0, 100)
+
 indv_vals = 2
 indvs_per_thread = 2
-mutation_threshold = 5  # threshold in range (0, 100)
 
 
 def _parse_args():
@@ -278,65 +280,86 @@ class Worker(multiprocessing.Process):
 
         if self.__worker_id == 0:
             # init first generation
-            data = [random.randint(0, max_init_val) for _ in range(self.__data_size())]  # individuals data
+            data = [[random.randint(0, MAX_INIT_VAL) for _ in range(self.__data_size())] for _ in range(ISLANDS)]
             self.__log(data)
 
         self.__barrier()
 
         for gen in range(0, GENERATIONS):
+            if self.__worker_id == 0:
+                print("GEN: ", gen)
+            for isl in range(ISLANDS):
 
-            if self.__worker_id == 0:  # master
+                if self.__worker_id == 0:  # master
 
-                # selection
-                self.__sort_individuals_data(data)
-                self.__log(data)
-                self.__log('Selection done.')
+                    # selection
+                    self.__sort_individuals_data(data[isl])
+                    self.__log(data[isl])
+                    self.__log('Selection done.')
 
-                best_solution_x = data[0]
-                best_solution_y = data[1]
+                    best_solution_x = data[isl][0]
+                    best_solution_y = data[isl][1]
 
-                # data sending to slaves
-                for ii in self.my_range(1, self.__n_workers, 1):
-                    msg_data = [best_solution_x, best_solution_y, data[ii * 2], data[(ii * 2) + 1]]
-                    self._send(ii, msg_data)
+                    # data sending to slaves
+                    for ii in self.my_range(1, self.__n_workers, 1):
+                        msg_data = [best_solution_x, best_solution_y, data[isl][ii * 2], data[isl][(ii * 2) + 1]]
+                        self._send(ii, msg_data)
 
-                self.__log('Sending data to slaves done.')
+                    self.__log('Sending data to slaves done.')
 
-                # data receiving from slaves
-                for ii in self.my_range(1, self.__n_workers, 1):
-                    source_id, msg_data = self._receive(ii)
-                    new_ii = (ii - 1) * 2 + self.__n_individuals()
-                    data[new_ii] = msg_data[0]
-                    data[new_ii + 1] = msg_data[1]
+                    # data receiving from slaves
+                    for ii in self.my_range(1, self.__n_workers, 1):
+                        source_id, msg_data = self._receive(ii)
+                        new_ii = (ii - 1) * 2 + self.__n_individuals()
+                        data[isl][new_ii] = msg_data[0]
+                        data[isl][new_ii + 1] = msg_data[1]
 
-                self.__log('Receiving data from slaves done.')
-                self.__log(data)
+                    self.__log('Receiving data from slaves done.')
 
-            else:  # slave
+                    # migration
+                    if ISLANDS >= 2:
+                        if random.randint(0, 100) < MIGRATION_THRESHOLD:
+                            mig_isl = random.randint(0, ISLANDS - 1)
+                            data[isl][self.__data_size() - 2] = data[mig_isl][0]
+                            data[isl][self.__data_size() - 1] = data[mig_isl][1]
 
-                source_id, msg_data = self._receive(0)
-                # crossover
-                new_x = (msg_data[0] + msg_data[2]) / 2
-                new_y = (msg_data[1] + msg_data[3]) / 2
+                    self.__sort_individuals_data(data[isl])
+                    self.__log(data[isl])
 
-                # mutation
-                if random.randint(0, 100) < mutation_threshold:
-                    if random.randint(0, 100) >= 50:
-                        new_x -= 1
-                        new_y -= 1
-                    else:
-                        new_x += 1
-                        new_y += 1
+                else:  # slave
 
-                new_msg_data = [new_x, new_y]
-                self._send(0, new_msg_data)
+                    source_id, msg_data = self._receive(0)
+                    # crossover
+                    new_x = (msg_data[0] + msg_data[2]) / 2
+                    new_y = (msg_data[1] + msg_data[3]) / 2
+
+                    # mutation
+                    if random.randint(0, 100) < MUTATION_THRESHOLD:
+                        if random.randint(0, 100) >= 50:
+                            new_x -= 1
+                            new_y -= 1
+                        else:
+                            new_x += 1
+                            new_y += 1
+
+                    new_msg_data = [new_x, new_y]
+                    self._send(0, new_msg_data)
 
         self.__barrier()
 
         if self.__worker_id == 0:
-            print("\nBEST SOLUTION: %.2f , %.2f\n" % (data[0], data[1]))
-            print("VALUE: %.2f\n" % self.__function_calculate(data[0], data[1]))
+            best_val = sys.maxsize
+            best_x = 0
+            best_y = 0
+            for isl in range(0, ISLANDS):
+                new_val = self.__function_calculate(data[isl][0], data[isl][1])
+                if new_val < best_val:
+                    best_x = data[isl][0]
+                    best_y = data[isl][1]
+                    best_val = new_val
 
+            print("BEST SOLUTION: %.2f , %.2f" % (best_x, best_y))
+            print("VALUE: %.2f" % best_val)
 
 
 def main():
