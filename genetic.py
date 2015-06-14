@@ -20,6 +20,12 @@ import sys
 import argparse
 import random
 import math
+from operator import itemgetter
+
+max_init_val = 100
+indv_vals = 2
+indvs_per_thread = 2
+
 
 
 def _parse_args():
@@ -207,6 +213,12 @@ class Worker(multiprocessing.Process):
     def __n_workers(self):
         return self.__configuration.n_workers
 
+    def __individuals_number(self):
+        return self.__configuration.n_workers * indvs_per_thread
+
+    def __data_size(self):
+        return self.__individuals_number() * indv_vals
+
     def __barrier(self):
         self.__shared.barrier.wait()
 
@@ -223,12 +235,48 @@ class Worker(multiprocessing.Process):
     def __log(self, message):
         print('[WORKER {}] {}'.format(self.__worker_id, message))
 
+    @staticmethod
+    def __function_calculate(x, y):
+        return x*x + y*y
+
     def __process(self, data):
         # simulates data processing delay by sleeping
         time.sleep(len(data) * self.__configuration.delay_process)
 
+    @staticmethod
+    def my_range(start, end, step):
+        while start < end:
+            yield start
+            start += step
+
+    def __sort_individuals_data(self, data):
+        self.__log('Sorting...')
+        individuals = []
+
+        for ii in self.my_range(0, self.__data_size(), indv_vals):
+            fitness = self.__function_calculate(data[ii], data[ii + 1])
+            individuals.append((fitness, data[ii], data[ii + 1]))
+
+        individuals.sort(key = itemgetter(0))
+
+        for ii in self.my_range(0, self.__individuals_number(), 1):
+            data[ii * 2] = individuals[ii][1]
+            data[(ii * 2) + 1] = individuals[ii][2]
+
     def run(self):
         self.__log('Started.')
+
+        # selection
+        if self.__worker_id == 0:
+
+            individuals_data = [random.randint(0, max_init_val) for _ in range(self.__data_size())]
+            print(individuals_data)
+
+            self.__sort_individuals_data(individuals_data)
+            print(individuals_data)
+
+
+
 
 
 def main():
