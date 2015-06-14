@@ -22,6 +22,8 @@ import random
 import math
 from operator import itemgetter
 
+DEBUG = 0
+GENERATIONS = 1000
 max_init_val = 100
 indv_vals = 2
 indvs_per_thread = 2
@@ -47,19 +49,19 @@ def _parse_args():
         '--delay-connect',
         help='network connection delay [s]',
         type=float,
-        default=0.1
+        default=0.0001
     )
     parser.add_argument(
         '--delay-transmit',
         help='network transmission delay [s]',
         type=float,
-        default=0.1
+        default=0.0001
     )
     parser.add_argument(
         '--delay-process',
         help='processing delay [s]',
         type=float,
-        default=0.1
+        default=0.0001
     )
 
     return argparse.Namespace(**{
@@ -236,7 +238,9 @@ class Worker(multiprocessing.Process):
         return [random.randint(-2048, 2048) for _ in range(length)]
 
     def __log(self, message):
-        print('[WORKER {}] {}'.format(self.__worker_id, message))
+        global DEBUG
+        if DEBUG:
+            print('[WORKER {}] {}'.format(self.__worker_id, message))
 
     @staticmethod
     def __function_calculate(x, y):
@@ -267,55 +271,72 @@ class Worker(multiprocessing.Process):
             data[(ii * 2) + 1] = individuals[ii][2]
 
     def run(self):
+
         self.__log('Started.')
 
-        if self.__worker_id == 0:  # master
+        data = []
 
+        if self.__worker_id == 0:
             # init first generation
             data = [random.randint(0, max_init_val) for _ in range(self.__data_size())]  # individuals data
-            print(data)
+            self.__log(data)
 
-            # selection
-            self.__sort_individuals_data(data)
-            print(data)
+        self.__barrier()
 
-            best_solution_x = data[0]
-            best_solution_y = data[1]
+        for gen in range(0, GENERATIONS):
 
-            # data sending to slaves
-            for ii in self.my_range(1, self.__n_workers, 1):
-                msg_data = [best_solution_x, best_solution_y, data[ii * 2], data[(ii * 2) + 1]]
-                self._send(ii, msg_data)
+            if self.__worker_id == 0:  # master
 
-            # data receiving from slaves
-            for ii in self.my_range(1, self.__n_workers, 1):
-                source_id, msg_data = self._receive(ii)
-                new_ii = (ii - 1) * 2 + self.__n_individuals()
-                data[new_ii] = msg_data[0]
-                data[new_ii + 1] = msg_data[1]
+                # selection
+                self.__sort_individuals_data(data)
+                self.__log(data)
+                self.__log('Selection done.')
 
-            print(data)
-            self.__sort_individuals_data(data)
-            print(data)
+                best_solution_x = data[0]
+                best_solution_y = data[1]
 
-        else:  # slave
+                # data sending to slaves
+                for ii in self.my_range(1, self.__n_workers, 1):
+                    msg_data = [best_solution_x, best_solution_y, data[ii * 2], data[(ii * 2) + 1]]
+                    self._send(ii, msg_data)
 
-            source_id, msg_data = self._receive(0)
-            # crossover
-            new_x = (msg_data[0] + msg_data[2]) / 2
-            new_y = (msg_data[1] + msg_data[3]) / 2
+                self.__log('Sending data to slaves done.')
 
-            # mutation
-            if random.randint(0, 100) < mutation_threshold:
-                if random.randint(0, 100) >= 50:
-                    new_x -= 1
-                    new_y -= 1
-                else:
-                    new_x += 1
-                    new_y += 1
+                # data receiving from slaves
+                for ii in self.my_range(1, self.__n_workers, 1):
+                    source_id, msg_data = self._receive(ii)
+                    new_ii = (ii - 1) * 2 + self.__n_individuals()
+                    data[new_ii] = msg_data[0]
+                    data[new_ii + 1] = msg_data[1]
 
-            new_msg_data = [new_x, new_y]
-            self._send(0, new_msg_data)
+                self.__log('Receiving data from slaves done.')
+                self.__log(data)
+
+            else:  # slave
+
+                source_id, msg_data = self._receive(0)
+                # crossover
+                new_x = (msg_data[0] + msg_data[2]) / 2
+                new_y = (msg_data[1] + msg_data[3]) / 2
+
+                # mutation
+                if random.randint(0, 100) < mutation_threshold:
+                    if random.randint(0, 100) >= 50:
+                        new_x -= 1
+                        new_y -= 1
+                    else:
+                        new_x += 1
+                        new_y += 1
+
+                new_msg_data = [new_x, new_y]
+                self._send(0, new_msg_data)
+
+        self.__barrier()
+
+        if self.__worker_id == 0:
+            print("\nBEST SOLUTION: %.2f , %.2f\n" % (data[0], data[1]))
+            print("VALUE: %.2f\n" % self.__function_calculate(data[0], data[1]))
+
 
 
 def main():
