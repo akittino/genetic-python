@@ -247,7 +247,7 @@ class Worker(multiprocessing.Process):
 
     @staticmethod
     def __function_calculate(x, y):
-        return (math.sin(2*x-3)*math.cos(-x+y*y-2)+3)*((-x+4)*(-x+4)+(2*y-5)*(2*y-5)+1)
+        return (math.sin(2*x-3)*math.cos(-x+math.pow(y, 2)-2)+3)*(math.pow(-x+4, 2)+math.pow(2*y-5, 2)+1)
 
     def __process(self, data):
         # simulates data processing delay by sleeping
