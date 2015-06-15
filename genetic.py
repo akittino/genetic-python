@@ -19,6 +19,7 @@ import datetime
 import sys
 import argparse
 import random
+import math
 from operator import itemgetter
 
 DEBUG = 0
@@ -246,7 +247,7 @@ class Worker(multiprocessing.Process):
 
     @staticmethod
     def __function_calculate(x, y):
-        return x*x + y*y
+        return (math.sin(2*x-3)*math.cos(-x+y*y-2)+3)*((-x+4)*(-x+4)+(2*y-5)*(2*y-5)+1)
 
     def __process(self, data):
         # simulates data processing delay by sleeping
